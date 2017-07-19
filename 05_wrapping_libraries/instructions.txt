@@ -1,0 +1,389 @@
+# Copyright (C) 2017, KeyWeeUsr(Peter Badida) <keyweeusr@gmail.com>
+# Version 1.0
+
+In this particular case I don't care about any optimization, compiler
+tricks or whatever. It's just a simple tutorial to show how to wrap
+a C library with Cython + Python and use it in Kivy or Python only
+without pulling your hair out.
+
+The purpose of this tutorial isn't to show how to convert some
+single-platform library into Windows + GNU/Linux compatible one.
+
+For more info find a book about C and read your compiler's manual.
+
+P.S.: all the files are included in this .txt file in case you want
+      to just copy&paste it to your gist/pastebin/whatever.
+
+
+**************************************************************
+GETTING SOMETHING TO COMPILE IT WITH
+(because why to preinstall some lightweight compiler for your
+OS anyway when you are an OS creator/maintainer... mystery...)
+**************************************************************
+
+GNU/Linux:
+	preferably try to install "build-essential" or "gcc"
+	via some package manager
+	or
+	https://gcc.gnu.org/
+
+Windows:
+	https://wiki.python.org/moin/WindowsCompilers
+	MSVC:
+		https://www.microsoft.com/en-us/download/details.aspx?id=44266
+		or
+		http://landinghub.visualstudio.com/visual-cpp-build-tools
+		or
+		https://www.visualstudio.com/vs/cplusplus/
+	GCC:
+		https://mingwpy.github.io/
+
+OSX:
+	I don't own it. Use GCC? Or if you find a solution,
+	feel free to contribute
+
+**************************************************************
+
+
+##############################################################
+WRITING A C LIBRARY (this is most likely done by someone else)
+##############################################################
+
+LIBRARY ITSELF:
+
+                        hellolib.h
+                        ----------
+
+#ifndef _HELLOLIB_H_
+#define _HELLOLIB_H_
+
+// This part is necessary only for MSVC to create a .lib and .dll files
+// and for GCC >= 4 to show the symbols at all
+
+// explicit custom argument for MSVC
+#if defined(MSVC_LIB)
+#   define HELLOLIBCALL __cdecl
+#   define HELLOLIBEXPORT __declspec(dllexport)
+// otherwise check automatically
+#else
+#   define HELLOLIBCALL
+#   if defined(__GNUC__) && __GNUC__ >= 4
+#       define HELLOLIBEXPORT __attribute__ ((visibility("default")))
+#   else
+#       define HELLOLIBEXPORT
+#   endif
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+HELLOLIBEXPORT char * HELLOLIBCALL hello(void);
+
+
+#ifdef __cplusplus
+}
+#endif
+
+// header endif
+#endif
+
+                        hellolib.c
+                        ----------
+
+#include "hellolib.h"
+
+char * hello(void) {
+    return "Hello from a library!";
+}
+
+
+RUNNING:
+
+                        main.c
+                        ------
+
+#include <stdio.h>
+#include "hellolib.h"
+
+int main() {
+    char * string = hello();
+    printf("%s", string);
+    return 0;
+}
+
+##############################################################
+
+MSVC:
+
+                        compile to library
+                        ------------------
+
+static:
+
+cl /c hellolib.c "-I%cd%" /Wall
+output:
+	hellolib.obj
+
+lib hellolib.obj /OUT:hellolib.lib
+output:
+    hellolib.lib
+
+
+shared:
+
+# pass MSVC_LIB to the preprocessor to trigger the macro in .H
+
+cl /DMSVC_LIB hellolib.c /LD "-I%cd%" /Wall
+output:
+	hellolib.dll
+	hellolib.lib
+	hellolib.exp
+
+
+                        use in a C file
+                        ===============
+
+                        compile with static lib
+                        -----------------------
+
+"static" ~= it copies the code to the executable and
+doesn't care about DLL/SO. Rename to check if true. :)
+
+static - .LIB and .H are required:
+
+cl main.c /link hellolib.lib "/LIBPATH:%cd%"
+output:
+	main.exe
+	main.obj (for whatever special reason)
+
+                        compile with shared lib(DLL)
+                        -----------------------------
+
+shared - .LIB and .H are required:
+
+cl main.c /link hellolib.lib "/LIBPATH:%cd%"
+output:
+	main.exe -> the final EXE requires .DLL when running
+	main.obj (for whatever special reason)
+
+##############################################################
+
+GCC:
+
+                        compile to library
+                        ------------------
+
+! replace "%cd%" with "$(pwd)" if on GNU/Linux !
+
+static:
+
+gcc -c hellolib.c "-I%cd%" "-L%cd%" -Wall
+output:
+	hellolib.o
+
+ar rcsv hellolib.a hellolib.o
+output:
+	hellolib.a
+
+
+shared:
+
+gcc -c hellolib.c -fPIC "-I%cd%" "-L%cd%" -Wall
+output:
+	hellolib.o
+
+gcc -shared -Wl,-soname,hellolib.so.1 -o hellolib.so.1 hellolib.o -Wall
+output:
+	hellolib.so.1
+
+                        use in a C file
+                        ===============
+
+                        compile with static lib
+                        -----------------------
+
+"static" ~= it copies the code to the executable and
+doesn't care about DLL/SO. Rename to check if true. :)
+
+static - .A file is required:
+
+gcc -static main.c "-L%cd%" -l:hellolib.a -o main.exe -Wall
+output:
+	main.exe
+
+                        compile with shared lib(DLL)
+                        -----------------------------
+
+shared - .SO and .H are required:
+
+gcc main.c "-I%cd%" "-L%cd%" -l:hellolib.so.1 -o main.exe -Wall
+output:
+	main.exe -> the final EXE requires .DLL when running
+
+on GNU/Linux run with:
+
+# .exe in the commands is used only for consistency between them
+LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH ./main.exe
+
+##############################################################
+
+
+==============================================================
+WRITING A CYTHON EXTENSION
+==============================================================
+
+                        cythonhellolib.pyx
+                        ------------------
+
+cdef extern from "hellolib.h":
+    cdef char * hello()
+
+def pyhello():
+    return hello()
+
+def pycharhello():
+    cdef char * st = hello()
+    return st
+
+==============================================================
+
+                        main.py
+                        -------
+
+from cythonhellolib import pyhello, pycharhello
+
+print("pyhello")
+print(pyhello())
+print("pycharhello")
+print(pycharhello())
+print("bye")
+
+==============================================================
+
+                        setup.py
+                        --------
+
+# run: python setup.py build_ext --inplace
+
+import Cython.Compiler.Options
+Cython.Compiler.Options.annotate = True
+from Cython.Distutils import build_ext
+
+from setuptools import setup
+from setuptools import Extension
+from os.path import abspath, dirname
+
+
+# select manually what library and linking to use
+import sys
+if 'msvc-static' in sys.argv:
+    libs = ['hellolib']
+    sys.argv.remove('msvc-static')
+elif 'msvc-shared' in sys.argv:
+    libs = ['hellolib']
+    sys.argv.remove('msvc-shared')
+elif 'gcc-static' in sys.argv:
+    libs = [':hellolib.a']
+    sys.argv.remove('gcc-static')
+elif 'gcc-shared' in sys.argv:
+    libs = [':hellolib.so.1']
+    sys.argv.remove('gcc-shared')
+else:
+    raise Exception(
+        "Choose from: "
+        "'msvc-static', 'msvc-shared', "
+        "'gcc-static', 'gcc-shared'!"
+    )
+
+
+CURRENT_DIR = dirname(abspath(__file__))
+
+name = 'cythonhellolib'
+
+ext_modules = [Extension(
+    name=name,
+    sources=[
+        'cythonhellolib.pyx',
+    ],
+    include_dirs=[CURRENT_DIR],
+    library_dirs=[CURRENT_DIR],
+    libraries=libs,
+    language='c'
+)]
+
+for mod in ext_modules:
+    mod.cython_directives = {
+        'language_level': 3,
+    }
+
+setup(
+    name=name,
+    ext_modules=ext_modules,
+    cmdclass={'build_ext': build_ext},
+)
+
+==============================================================
+
+
+--------------------------------------------------------------
+COMPILING & RUNNING:
+--------------------------------------------------------------
+
+necessary files : setup.py, .PYX, .H, .LIB/.A .DLL/.SO
+
+# This step is necessary only if you make your own C library.
+# If you only work with some already existing library, just
+# make sure you have the appropriate files to compile and link
+# against it .H and .LIB/.A and a .DLL/.SO to pull symbols from
+compile the library:
+    - either static or shared
+    - make sure the library file exists (.OBJ/.A/.DLL/.SO)
+    - don't forget to include the file with functions' declarations (.H)
+
+compile the cython extension (choose one of the commands below):
+    python setup.py build_ext --inplace msvc-static
+    python setup.py build_ext --inplace msvc-shared
+    python setup.py build_ext --inplace gcc-static
+    python setup.py build_ext --inplace gcc-shared
+
+# after this step only these files are necessary:
+    if static: .PY .PYD
+    if shared: .PY .PYD + .SO/.DLL on the system path (or in folder)
+
+run:
+    python main.py
+
+on GNU/Linux run with:
+    LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH python main.py
+
+--------------------------------------------------------------
+
+
+More resources:
+
+# wtf is "ar"? why is there "rcsv"?! Should I just throw random
+# characters to that magical thing and the rest will work? O_o
+https://linux.die.net/man/1/ar
+https://en.wikipedia.org/wiki/Ar_(Unix)
+
+# how am I supposed to use that special "lib" thingy on Windows?
+https://msdn.microsoft.com/en-us/library/h34w59b3.aspx
+
+# what is that strange declspec and wtf is with the header macros
+https://en.wikipedia.org/wiki/Calling_convention
+https://www.codeproject.com/Articles/1388/Calling-Conventions-Demystified
+https://msdn.microsoft.com/en-us/library/dabb5z75(VS.80).aspx
+
+# why can't I just "./main" or "python main.py" on GNU/Linux?
+http://tldp.org/HOWTO/Program-Library-HOWTO/shared-libraries.html
+
+# what is -Wl,-soname stuff?
+https://stackoverflow.com/a/14613602/5994041
+
+# fine, but what next?
+http://docs.cython.org/en/latest/
+http://docs.cython.org/en/latest/src/userguide/external_C_code.html
+http://docs.cython.org/en/latest/src/userguide/sharing_declarations.html
+https://stackoverflow.com/a/5162028/5994041
+https://stackoverflow.com/q/2384932/5994041
