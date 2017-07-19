@@ -29,6 +29,7 @@ GNU/Linux:
 
 Windows:
 	https://wiki.python.org/moin/WindowsCompilers
+        https://matthew-brett.github.io/pydagogue/python_msvc.html
 	MSVC:
 		https://www.microsoft.com/en-us/download/details.aspx?id=44266
 		or
